@@ -13,7 +13,7 @@ class ReminderReceiver : BroadcastReceiver() {
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         // Create an intent to open the app when notification is tapped
-        val contentIntent = Intent(context, MainViewModel::class.java).apply {
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
         val pendingIntent = PendingIntent.getActivity(
@@ -33,18 +33,5 @@ class ReminderReceiver : BroadcastReceiver() {
             .build()
 
         notificationManager.notify(1, notification)
-
-        // Schedule next reminder
-        val hour = intent.getIntExtra("REMINDER_HOUR", -1)
-        val minute = intent.getIntExtra("REMINDER_MINUTE", -1)
-
-        if (hour != -1 && minute != -1) {
-            val mainIntent = Intent(context, MainViewModel::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                putExtra("REMINDER_HOUR", hour)
-                putExtra("REMINDER_MINUTE", minute)
-            }
-            context.startActivity(mainIntent)
-        }
     }
 }

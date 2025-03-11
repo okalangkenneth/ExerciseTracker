@@ -76,19 +76,25 @@ fun SettingsScreen(
                 ) {
                     Button(
                         onClick = { onDailyGoalChange(5000) },
-                        modifier = Modifier.weight(1f).padding(end = 4.dp)
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 4.dp)
                     ) {
                         Text("5,000")
                     }
                     Button(
                         onClick = { onDailyGoalChange(7500) },
-                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 4.dp)
                     ) {
                         Text("7,500")
                     }
                     Button(
                         onClick = { onDailyGoalChange(10000) },
-                        modifier = Modifier.weight(1f).padding(start = 4.dp)
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 4.dp)
                     ) {
                         Text("10,000")
                     }

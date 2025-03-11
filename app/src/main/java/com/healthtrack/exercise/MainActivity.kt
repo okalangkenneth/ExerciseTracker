@@ -1,182 +1,88 @@
 package com.healthtrack.exercise
 
-import android.app.Application
+import android.app.AlarmManager
+import android.app.PendingIntent
+import android.app.TimePickerDialog
 import android.content.Context
-import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
-import android.util.Log
-import androidx.lifecycle.AndroidViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import java.time.LocalDate
-import com.healthtrack.exercise.models.DailyProgress
+import android.content.Intent
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.ShowChart
+import androidx.compose.material.icons.automirrored.outlined.DirectionsWalk
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.healthtrack.exercise.ui.theme.ExerciseTrackerTheme
+import java.util.*
+import androidx.activity.viewModels
 
-class MainViewModel(application: Application) : AndroidViewModel(application), SensorEventListener {
-    private val sensorManager = application.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private val stepDetector: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
-    private val stepCounter: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
-    private var initialStepCount = -1f
-    private var lastSensorUpdate = 0L
 
-    private val _currentScreen = MutableStateFlow("home")
-    val currentScreen: StateFlow<String> = _currentScreen.asStateFlow()
 
-    private val _steps = MutableStateFlow(0)
-    val steps: StateFlow<Int> = _steps.asStateFlow()
-
-    private val _stepInput = MutableStateFlow("")
-    val stepInput: StateFlow<String> = _stepInput.asStateFlow()
-
-    private val _dailyGoal = MutableStateFlow(5000)
-    val dailyGoal: StateFlow<Int> = _dailyGoal.asStateFlow()
-
-    private val _showCongratulations = MutableStateFlow(false)
-    val showCongratulations: StateFlow<Boolean> = _showCongratulations.asStateFlow()
-
-    private val _usePedometer = MutableStateFlow(false)
-    val usePedometer: StateFlow<Boolean> = _usePedometer.asStateFlow()
-
-    private val _progressHistory = MutableStateFlow<List<DailyProgress>>(listOf(
-        DailyProgress(
-            date = LocalDate.now(),
-            steps = 0,
-            goalAchieved = false
-        )
-    ))
-    val progressHistory: StateFlow<List<DailyProgress>> = _progressHistory.asStateFlow()
-
-    init {
-        Log.d("MainViewModel", "Step detector available: ${stepDetector != null}")
-        Log.d("MainViewModel", "Step counter available: ${stepCounter != null}")
-        // Initialize with some sample data
-        _progressHistory.value = generateSampleHistory()
-    }
-
-    private fun generateSampleHistory(): List<DailyProgress> {
-        return (6 downTo 0).map { daysAgo ->
-            val date = LocalDate.now().minusDays(daysAgo.toLong())
-            val steps = (3000..8000).random()
-            DailyProgress(
-                date = date,
-                steps = steps,
-                goalAchieved = steps >= _dailyGoal.value
-            )
-        }
-    }
-
-    fun updateCurrentScreen(screen: String) {
-        _currentScreen.value = screen
-    }
-
-    fun updateStepInput(input: String) {
-        _stepInput.value = input
-    }
-
-    fun addSteps() {
-        _stepInput.value.toIntOrNull()?.let { newSteps ->
-            _steps.value += newSteps
-            _stepInput.value = ""
-            updateProgress()
-        }
-    }
-
-    fun resetSteps() {
-        _steps.value = 0
-        _showCongratulations.value = false
-        initialStepCount = -1f
-        updateProgress()
-    }
-
-    fun updateDailyGoal(goal: Int) {
-        _dailyGoal.value = goal
-        updateProgress()
-    }
-
-    fun updateUsePedometer(enabled: Boolean) {
-        if (_usePedometer.value == enabled) return
-
-        _usePedometer.value = enabled
-        if (enabled) {
-            registerSensors()
-        } else {
-            unregisterSensors()
-        }
-        Log.d("MainViewModel", "Pedometer ${if (enabled) "enabled" else "disabled"}")
-    }
-
-    private fun registerSensors() {
-        stepCounter?.let {
-            sensorManager.registerListener(
-                this,
-                it,
-                SensorManager.SENSOR_DELAY_NORMAL
-            )
-        }
-
-        stepDetector?.let {
-            sensorManager.registerListener(
-                this,
-                it,
-                SensorManager.SENSOR_DELAY_NORMAL
-            )
-        }
-    }
-
-    private fun unregisterSensors() {
-        sensorManager.unregisterListener(this)
-    }
-
-    override fun onSensorChanged(event: SensorEvent?) {
-        if (!_usePedometer.value) return
-
-        event?.let {
-            val currentTime = System.currentTimeMillis()
-            when (event.sensor.type) {
-                Sensor.TYPE_STEP_DETECTOR -> {
-                    if (currentTime - lastSensorUpdate > 200) { // Debounce threshold
-                        _steps.value += 1
-                        lastSensorUpdate = currentTime
-                        updateProgress()
-                    }
-                }
-                Sensor.TYPE_STEP_COUNTER -> {
-                    val newSteps = event.values[0]
-                    if (initialStepCount < 0) {
-                        initialStepCount = newSteps
-                    }
-                    val stepCount = (newSteps - initialStepCount).toInt()
-                    if (stepCount > 0) {
-                        _steps.value = stepCount
-                        updateProgress()
-                    }
+class MainActivity : ComponentActivity() {
+        private val viewModel by viewModels<MainViewModel>()  // Add this line
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            ExerciseTrackerTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                       MainScreen(
+                        viewModel = viewModel,
+                        onShowTimePickerDialog = { showTimePickerDialog(viewModel) }  // Pass the existing instance
+                    )
                 }
             }
         }
     }
 
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-        Log.d("MainViewModel", "Sensor accuracy changed: $accuracy")
+    private fun showTimePickerDialog(viewModel: MainViewModel) {
+        val calendar = Calendar.getInstance()
+        TimePickerDialog(
+            this,
+            { _, hour: Int, minute: Int ->
+                val timeString = String.format(Locale.getDefault(), "%02d:%02d", hour, minute)
+                viewModel.updateReminderTime(timeString)
+                scheduleReminder(hour, minute)
+            },
+            calendar.get(Calendar.HOUR_OF_DAY),
+            calendar.get(Calendar.MINUTE),
+            true
+        ).show()
     }
 
-    private fun updateProgress() {
-        _showCongratulations.value = _steps.value >= _dailyGoal.value
+    private fun scheduleReminder(hour: Int, minute: Int) {
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(this, ReminderReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
-        // Update progress history
-        val today = LocalDate.now()
-        val updatedHistory = _progressHistory.value.filterNot { it.date == today } +
-                DailyProgress(
-                    date = today,
-                    steps = _steps.value,
-                    goalAchieved = _steps.value >= _dailyGoal.value
-                )
-        _progressHistory.value = updatedHistory.sortedByDescending { it.date }
-    }
+        val calendar = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, 0)
+            if (before(Calendar.getInstance())) {
+                add(Calendar.DAY_OF_MONTH, 1)
+            }
+        }
 
-    override fun onCleared() {
-        super.onCleared()
-        unregisterSensors()
+        alarmManager.setRepeating(
+            AlarmManager.RTC_WAKEUP,
+            calendar.timeInMillis,
+            AlarmManager.INTERVAL_DAY,
+            pendingIntent
+        )
     }
 }

@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.time.LocalDate
-import com.healthtrack.exercise.models.DailyProgress  // Import from the models package
+import com.healthtrack.exercise.models.DailyProgress
 
 class MainViewModel(application: Application) : AndroidViewModel(application), SensorEventListener {
     private val sensorManager = application.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -39,6 +39,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), S
     private val _usePedometer = MutableStateFlow(false)
     val usePedometer: StateFlow<Boolean> = _usePedometer.asStateFlow()
 
+    private val _reminderTime = MutableStateFlow("08:00")
+    val reminderTime: StateFlow<String> = _reminderTime.asStateFlow()
+
     private val _progressHistory = MutableStateFlow<List<DailyProgress>>(listOf(
         DailyProgress(
             date = LocalDate.now(),
@@ -51,20 +54,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application), S
     init {
         Log.d("MainViewModel", "Step detector available: ${stepDetector != null}")
         Log.d("MainViewModel", "Step counter available: ${stepCounter != null}")
-        // Initialize with some sample data
-        _progressHistory.value = generateSampleHistory()
+        // Initialize with empty list
+        _progressHistory.value = emptyList()
     }
 
     private fun generateSampleHistory(): List<DailyProgress> {
-        return (6 downTo 0).map { daysAgo ->
-            val date = LocalDate.now().minusDays(daysAgo.toLong())
-            val steps = (3000..8000).random()
-            DailyProgress(
-                date = date,
-                steps = steps,
-                goalAchieved = steps >= _dailyGoal.value
-            )
-        }
+        // Return an empty list instead of sample data
+        return emptyList()
     }
 
     fun updateCurrentScreen(screen: String) {
@@ -105,6 +101,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), S
             unregisterSensors()
         }
         Log.d("MainViewModel", "Pedometer ${if (enabled) "enabled" else "disabled"}")
+    }
+
+    fun updateReminderTime(time: String) {
+        _reminderTime.value = time
     }
 
     private fun registerSensors() {

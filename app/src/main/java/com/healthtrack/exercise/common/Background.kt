@@ -9,9 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
-import coil.request.ImageRequest
 
 @Composable
 fun CommonBackground(
@@ -20,10 +18,7 @@ fun CommonBackground(
     Box(modifier = Modifier.fillMaxSize()) {
         // Background Image
         AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data("https://images.pexels.com/photos/235922/pexels-photo-235922.jpeg")
-                .crossfade(true)
-                .build(),
+            model = "https://images.pexels.com/photos/235922/pexels-photo-235922.jpeg",
             contentDescription = "Background walking person",
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop
