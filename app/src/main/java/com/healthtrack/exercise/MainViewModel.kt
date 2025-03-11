@@ -8,18 +8,26 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import com.healthtrack.exercise.models.DailyProgress
+import kotlin.math.sqrt
 
 class MainViewModel(application: Application) : AndroidViewModel(application), SensorEventListener {
+    private val tag = "MainViewModel"
     private val sensorManager = application.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val stepDetector: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
     private val stepCounter: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+    private val accelerometer: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
     private var initialStepCount = -1f
     private var lastSensorUpdate = 0L
+    private var sensorRegistered = false
+    private var debugCounter = 0
 
     private val _currentScreen = MutableStateFlow("home")
     val currentScreen: StateFlow<String> = _currentScreen.asStateFlow()
@@ -42,25 +50,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application), S
     private val _reminderTime = MutableStateFlow("08:00")
     val reminderTime: StateFlow<String> = _reminderTime.asStateFlow()
 
-    private val _progressHistory = MutableStateFlow<List<DailyProgress>>(listOf(
-        DailyProgress(
-            date = LocalDate.now(),
-            steps = 0,
-            goalAchieved = false
-        )
-    ))
+    private val _progressHistory = MutableStateFlow<List<DailyProgress>>(emptyList())
     val progressHistory: StateFlow<List<DailyProgress>> = _progressHistory.asStateFlow()
 
-    init {
-        Log.d("MainViewModel", "Step detector available: ${stepDetector != null}")
-        Log.d("MainViewModel", "Step counter available: ${stepCounter != null}")
-        // Initialize with empty list
-        _progressHistory.value = emptyList()
+    // Create a custom accelerometer-based step counter if hardware sensors aren't available
+    private val accelerometerStepCounter = AccelerometerStepCounter {
+        viewModelScope.launch {
+            _steps.value += 1
+            updateProgress()
+            Log.d(tag, "Accelerometer step detected, total: ${_steps.value}")
+        }
     }
 
-    private fun generateSampleHistory(): List<DailyProgress> {
-        // Return an empty list instead of sample data
-        return emptyList()
+    // Add this function to print all available sensors (for debugging)
+    private fun logAvailableSensors() {
+        val allSensors = sensorManager.getSensorList(Sensor.TYPE_ALL)
+        Log.d(tag, "Available sensors (${allSensors.size}):")
+        allSensors.forEach { sensor ->
+            Log.d(tag, "Sensor: ${sensor.name}, Type: ${sensor.type}")
+        }
+    }
+
+    init {
+        // Log detailed sensor information
+        logAvailableSensors()
+        Log.d(tag, "Step detector available: ${stepDetector?.name ?: "Not available"}")
+        Log.d(tag, "Step counter available: ${stepCounter?.name ?: "Not available"}")
+        Log.d(tag, "Accelerometer available: ${accelerometer?.name ?: "Not available"}")
+
+        // Initialize with empty progress history
+        _progressHistory.value = emptyList()
+        updateProgress() // Add the current day with 0 steps to history
+
+        // Uncomment for debugging
+        // debugStepSimulation()
+    }
+
+    private fun debugStepSimulation() {
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(5000)
+                if (_usePedometer.value) {
+                    debugCounter++
+                    _steps.value += 100
+                    Log.d(tag, "DEBUG: Simulated 100 steps, total: ${_steps.value}")
+                    updateProgress()
+                }
+            }
+        }
     }
 
     fun updateCurrentScreen(screen: String) {
@@ -95,12 +132,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application), S
         if (_usePedometer.value == enabled) return
 
         _usePedometer.value = enabled
+        Log.d(tag, "Pedometer enabled: $enabled")
+
         if (enabled) {
             registerSensors()
         } else {
             unregisterSensors()
         }
-        Log.d("MainViewModel", "Pedometer ${if (enabled) "enabled" else "disabled"}")
     }
 
     fun updateReminderTime(time: String) {
@@ -108,25 +146,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     private fun registerSensors() {
-        stepCounter?.let {
-            sensorManager.registerListener(
+        // Unregister first to avoid duplicates
+        unregisterSensors()
+        sensorRegistered = false
+
+        // Try different sensor types with different sampling rates
+        stepDetector?.let {
+            // Try to register with multiple sensitivity levels
+            val registered = sensorManager.registerListener(
                 this,
                 it,
-                SensorManager.SENSOR_DELAY_NORMAL
+                SensorManager.SENSOR_DELAY_FASTEST
             )
+            if (registered) {
+                sensorRegistered = true
+                Log.d(tag, "Step detector registered with FASTEST delay")
+            }
         }
 
-        stepDetector?.let {
-            sensorManager.registerListener(
+        stepCounter?.let {
+            val registered = sensorManager.registerListener(
                 this,
                 it,
-                SensorManager.SENSOR_DELAY_NORMAL
+                SensorManager.SENSOR_DELAY_GAME
             )
+            if (registered) {
+                sensorRegistered = true
+                Log.d(tag, "Step counter registered with GAME delay")
+            }
+        }
+
+        // Last resort: use the accelerometer for custom step detection
+        if (!sensorRegistered && accelerometer != null) {
+            val registered = sensorManager.registerListener(
+                this,
+                accelerometer,
+                SensorManager.SENSOR_DELAY_GAME
+            )
+            if (registered) {
+                sensorRegistered = true
+                Log.d(tag, "Using accelerometer for step detection")
+            }
+        }
+
+        if (!sensorRegistered) {
+            Log.e(tag, "Failed to register any step sensors!")
         }
     }
 
     private fun unregisterSensors() {
         sensorManager.unregisterListener(this)
+        accelerometerStepCounter.stop(sensorManager)
+        Log.d(tag, "All sensors unregistered")
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
@@ -134,31 +205,83 @@ class MainViewModel(application: Application) : AndroidViewModel(application), S
 
         event?.let {
             val currentTime = System.currentTimeMillis()
-            when (event.sensor.type) {
+            val sensor = event.sensor
+
+            when (sensor.type) {
                 Sensor.TYPE_STEP_DETECTOR -> {
-                    if (currentTime - lastSensorUpdate > 200) { // Debounce threshold
-                        _steps.value += 1
+                    // Step detector directly reports steps (usually 1.0 per step)
+                    // Add debounce to avoid counting every minor movement
+                    if (currentTime - lastSensorUpdate > 500) { // 500ms debounce period
+                        val steps = event.values[0].toInt()
+                        _steps.value += steps
                         lastSensorUpdate = currentTime
+                        Log.d(tag, "Step detector registered $steps steps, total: ${_steps.value}")
                         updateProgress()
+                    } else {
+
                     }
                 }
+
                 Sensor.TYPE_STEP_COUNTER -> {
-                    val newSteps = event.values[0]
+                    // Step counter gives the total steps since reboot
+                    val totalSteps = event.values[0]
+                    Log.d(tag, "Step counter raw value: $totalSteps")
+
                     if (initialStepCount < 0) {
-                        initialStepCount = newSteps
+                        initialStepCount = totalSteps
+                        Log.d(tag, "Initial step count set to: $initialStepCount")
+                    } else {
+                        val stepsDelta = (totalSteps - initialStepCount).toInt()
+                        if (stepsDelta > 0 && stepsDelta != _steps.value) {
+                            _steps.value = stepsDelta
+                            Log.d(tag, "Steps updated to: $stepsDelta")
+                            updateProgress()
+                        } else {
+
+                        }
                     }
-                    val stepCount = (newSteps - initialStepCount).toInt()
-                    if (stepCount > 0) {
-                        _steps.value = stepCount
-                        updateProgress()
+                }
+
+                Sensor.TYPE_ACCELEROMETER -> {
+                    // Custom accelerometer-based step detection
+                    // This is a simplified algorithm - you may need a more sophisticated approach
+                    val x = event.values[0]
+                    val y = event.values[1]
+                    val z = event.values[2]
+
+                    // Calculate magnitude of acceleration
+                    val magnitude = sqrt((x*x + y*y + z*z).toDouble()).toFloat()
+
+                    // More strict peak detection with higher threshold and longer cooldown
+                    if (magnitude > 15 && (currentTime - lastSensorUpdate) > 200) { // higher threshold and longer cooldown
+                        // Log for debugging but don't count step yet
+                        Log.d(tag, "Possible step detected with magnitude: $magnitude")
+
+                        // Only count steps with stronger motion pattern
+                        if (magnitude > 18) {
+                            _steps.value += 1
+                            lastSensorUpdate = currentTime
+                            Log.d(tag, "Accelerometer detected step, total: ${_steps.value}")
+                            updateProgress()
+                    } else {
+
+                        }
+
+                    } else {
+
                     }
+                }
+
+                else -> {
+                    // Handle any other sensor type
+                    Log.d(tag, "Unhandled sensor type: ${sensor.type}")
                 }
             }
         }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-        Log.d("MainViewModel", "Sensor accuracy changed: $accuracy")
+        Log.d(tag, "Sensor accuracy changed: $accuracy")
     }
 
     private fun updateProgress() {
